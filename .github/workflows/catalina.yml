@@ -1,6 +1,8 @@
 name: Catalina build (manual)
 
 # Builds upstream PhotoCraft for Intel macOS 10.15+ and stores the DMG as a build artifact.
+# The repository holds no PhotoCraft source: the workflow checks out upstream, lowers the
+# minimum macOS version and applies screen-capture-catalina.patch from this repository.
 # Manual start only. It does NOT create a public release.
 
 on:
@@ -19,6 +21,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
+      - name: Check out this repository (patch)
+        uses: actions/checkout@v4
+        with:
+          path: fork
+
       - name: Check out upstream PhotoCraft
         uses: actions/checkout@v4
         with:
@@ -60,6 +67,12 @@ jobs:
           grep -n -A1 'LSMinimumSystemVersion' packaging/macos/Info.plist.in
           grep -q 'MACOSX_DEPLOYMENT_TARGET=10.15' packaging/macos/package.sh
           grep -A1 'LSMinimumSystemVersion' packaging/macos/Info.plist.in | grep -q '<string>10.15</string>'
+
+      - name: Apply screen capture patch (macOS 10.15 crash fix)
+        working-directory: photocraft
+        run: |
+          git apply --3way --verbose "$GITHUB_WORKSPACE/fork/screen-capture-catalina.patch"
+          grep -n 'screen_capture_access_api_exists' apps/photocraft/src/screen_color.rs
 
       - name: Add Intel target
         run: rustup target add x86_64-apple-darwin
