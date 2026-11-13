@@ -1,0 +1,104 @@
+name: Catalina build (manual)
+
+# Builds upstream PhotoCraft for Intel macOS 10.15+ and stores the DMG as a build artifact.
+# Manual start only. It does NOT create a public release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream tag or branch to build (empty = latest v* tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Check out upstream PhotoCraft
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/photocraft
+          path: photocraft
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check out translations
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-i18n
+          path: craft-i18n
+
+      - name: Select upstream version
+        working-directory: photocraft
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          REF="$INPUT_REF"
+          if [ -z "$REF" ]; then
+            REF="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          fi
+          if [ -z "$REF" ]; then
+            echo "No ref given and no v* tag found" >&2
+            exit 1
+          fi
+          echo "Building upstream ref: $REF"
+          git checkout --detach "$REF"
+          echo "UPSTREAM_REF=$REF" >> "$GITHUB_ENV"
+          git log -1 --oneline
+
+      - name: Lower minimum macOS version to 10.15
+        working-directory: photocraft
+        run: |
+          perl -pi -e 's/MACOSX_DEPLOYMENT_TARGET=11\.0/MACOSX_DEPLOYMENT_TARGET=10.15/' packaging/macos/package.sh
+          perl -0pi -e 's|(LSMinimumSystemVersion</key>\s*<string>)11\.0|${1}10.15|' packaging/macos/Info.plist.in
+          grep -n 'MACOSX_DEPLOYMENT_TARGET' packaging/macos/package.sh
+          grep -n -A1 'LSMinimumSystemVersion' packaging/macos/Info.plist.in
+          grep -q 'MACOSX_DEPLOYMENT_TARGET=10.15' packaging/macos/package.sh
+          grep -A1 'LSMinimumSystemVersion' packaging/macos/Info.plist.in | grep -q '<string>10.15</string>'
+
+      - name: Add Intel target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Build and package (x86_64, ad-hoc signed)
+        working-directory: photocraft
+        env:
+          CRAFT_I18N_DIR: ${{ github.workspace }}/craft-i18n
+        run: ./packaging/macos/package.sh --arch x86_64
+
+      - name: Verify minimum system version
+        working-directory: photocraft
+        run: |
+          BIN="target/x86_64-apple-darwin/release/photocraft"
+          otool -l "$BIN" | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX'
+          otool -l "$BIN" | grep -Eq 'minos 10\.15|version 10\.15'
+
+      - name: Locate DMG and checksum
+        id: dmg
+        run: |
+          DMG="$(find "$GITHUB_WORKSPACE/photocraft" -name 'photocraft-*-macos-x86_64.dmg' -not -path '*/target/*' | head -n 1)"
+          if [ -z "$DMG" ]; then
+            echo "DMG not found" >&2
+            exit 1
+          fi
+          echo "path=$DMG" >> "$GITHUB_OUTPUT"
+          SUM="$(shasum -a 256 "$DMG")"
+          echo "$SUM"
+          {
+            echo "### Built $UPSTREAM_REF"
+            echo '```'
+            echo "$SUM"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-${{ env.UPSTREAM_REF }}-macos10.15-x86_64
+          path: ${{ steps.dmg.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
