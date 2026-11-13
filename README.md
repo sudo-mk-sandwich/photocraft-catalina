@@ -5,7 +5,8 @@ run on **macOS 10.15 Catalina on Intel Macs**. It is not affiliated with or endo
 original authors. PhotoCraft is made by the ArtCraft team and its contributors and is licensed
 under MIT OR Apache-2.0.
 
-This repository contains **no PhotoCraft source code**. It only holds:
+This is a GitHub fork of PhotoCraft. Its source code is **not modified**: the changes below are
+applied at build time. What this fork adds:
 
 - `screen-capture-catalina.patch`, a small source patch (see below),
 - `.github/workflows/catalina.yml`, a GitHub Actions workflow that builds upstream PhotoCraft with
